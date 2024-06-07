@@ -1,0 +1,14 @@
+{% import "node.j2_macro" as m with context %}
+{
+	"name": "Starter",
+	"version": "1.0.0",
+	"description": "OCI Starter",
+	"main": "func.js",
+	"author": "You",
+	"license": "Apache-2.0",
+	"dependencies": {
+		"@fnproject/fdk": ">=0.0.43"
+		{{ m.dependencies() }}   
+	}
+}
+

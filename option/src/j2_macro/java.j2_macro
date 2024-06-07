@@ -1,0 +1,247 @@
+{% macro import() -%}    
+import java.io.*;
+import java.util.*;
+{%- if db_family == "oracle" and java_framework != "micronaut" %}
+import oracle.ucp.jdbc.PoolDataSourceFactory;
+import oracle.ucp.jdbc.PoolDataSource;
+{%- elif db_family == "nosql" %}
+import oracle.nosql.driver.*;
+import oracle.nosql.driver.iam.*;
+import oracle.nosql.driver.ops.*;
+import oracle.nosql.driver.values.*;
+{%- elif db_family == "opensearch" %}
+import java.net.*;
+import java.util.stream.*;
+import javax.json.*;
+{%- endif %}       
+{%- endmacro -%}   
+
+{% macro dependencies() -%}
+{%- if db_family == "nosql" %}  
+    <dependency>
+      <groupId>com.oracle.nosql.sdk</groupId>
+      <artifactId>nosqldriver</artifactId>
+      <version>5.4.14</version>
+    </dependency>
+    {%- if java_framework == "springboot" %}    
+    <dependency>
+      <groupId>com.oracle.nosql.sdk</groupId>
+      <artifactId>spring-data-oracle-nosql</artifactId>
+      <version>2.0.0</version>
+    </dependency>   
+    {%- elif java_framework in ["helidon","helidon4"] %}    
+    <dependency>
+      <groupId>io.helidon.microprofile.openapi</groupId>
+      <artifactId>helidon-microprofile-openapi</artifactId>
+    </dependency>     
+    <dependency>
+      <groupId>jakarta.json.bind</groupId>
+      <artifactId>jakarta.json.bind-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jnosql.databases</groupId>
+      <artifactId>jnosql-oracle-nosql</artifactId>
+      <version>1.1.0</version>
+    </dependency>    
+    {%- endif %}
+{%- elif db_family_type == "sql" %}  
+    <dependency>
+      <groupId>{{ pomGroupId }}</groupId>
+      <artifactId>{{ pomArtifactId }}</artifactId>
+      {%- if java_framework != "springboot" or deploy_type == "function" %}
+      <version>{{ pomVersion }}</version>
+      {%- endif %}
+    </dependency>  
+    {%- if java_framework == "springboot" %}
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>    
+    {%- endif %}
+{%- endif %}
+{%- if db_family == "oracle" %}  
+    <dependency>
+      <groupId>com.oracle.database.jdbc</groupId>
+      <artifactId>ucp</artifactId>
+      {%- if java_framework != "springboot" or deploy_type == "function" %}
+      <version>{{ pomVersion }}</version>
+      {%- endif %}
+    </dependency>    
+{%- endif %}   
+    <dependency>
+      <groupId>org.glassfish</groupId>
+      <artifactId>javax.json</artifactId>
+      <version>1.1.4</version>
+    </dependency>   
+{%- endmacro -%}  
+
+{% macro constructor() -%}
+    {%- if db_family == "nosql" %}
+    {%- if java_framework in ["helidon","helidon4"] %}
+    static NoSQLHandle handle;
+    {%- else %}
+    private final NoSQLHandle handle;
+    {%- endif %}
+    {%- endif %}
+    {%- if db_family == "oracle" and java_framework not in ["springboot", "micronaut"] %}
+    static PoolDataSource pds = PoolDataSourceFactory.getPoolDataSource();
+    {%- endif %}
+    {%- if deploy_type == "function" %}
+    public HelloFunction() throws Exception {
+    {%- elif java_framework == "springboot" %}
+    @Autowired
+    {%- if db_family_type == "sql" %}  
+    private final DemoRepository repository;
+
+    DemoController(DemoRepository repository) {
+        this.repository = repository;
+    {%- else %}
+    public DemoController() throws Exception {
+    {%- endif %}
+    {%- elif java_framework in ["helidon","helidon4"] %}
+    public DeptResource() throws Exception {
+        {%- if db_family == "nosql" %}
+        if( handle!= null ) {
+            return;
+        }     
+        {%- endif %}
+    {%- elif java_framework == "micronaut" %}
+    public DeptController() throws Exception {
+    {%- elif java_framework == "tomcat" %}
+    public DeptServlet() throws Exception {
+    {%- endif %}
+    {%- if db_family == "oracle" and java_framework not in ["springboot", "micronaut"] %}
+        pds.setConnectionFactoryClassName("oracle.jdbc.pool.OracleDataSource");
+        pds.setURL(System.getenv("JDBC_URL"));
+        pds.setUser(System.getenv("DB_USER"));
+        pds.setPassword(System.getenv("DB_PASSWORD"));
+        pds.setInitialPoolSize(3);
+        pds.setMinPoolSize(3);
+        pds.setMaxPoolSize(10);    
+    {%- elif db_family == "nosql" and java_framework != "springboot" %}
+        {{ nosql_connection() }}
+        handle = NoSQLHandleFactory.createNoSQLHandle(config);
+    {%- endif %}
+    }
+{%- endmacro -%}
+
+{% macro nosql_connection() -%}
+        {%- if deploy_type in ["compute", "kubernetes", "instance_pool"] %}
+        SignatureProvider authProvider = SignatureProvider.createWithInstancePrincipal();
+        {%- else %}
+        SignatureProvider authProvider = SignatureProvider.createWithResourcePrincipal();
+        {%- endif %}        
+        NoSQLHandleConfig config = new NoSQLHandleConfig( System.getenv("TF_VAR_nosql_endpoint"), authProvider);
+        config.setDefaultCompartment( System.getenv("TF_VAR_compartment_ocid") );
+{%- endmacro -%}
+    
+
+{% macro dept() -%}
+        {{ dept_no_return() }}
+        return rows; 
+{%- endmacro -%}
+
+{% macro dept_string() -%}
+        String json = "-";
+        try {
+            {%- if db_family_type == "sql" %}        
+            Class.forName("{{ jdbcDriverClassName }}");    
+            {%- endif %}        
+            {{ dept_no_return() | indent(4) }}
+            // Jackson 
+            ObjectMapper objectMapper = new ObjectMapper();
+            json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(rows);
+        } catch (Exception e) {
+            System.err.println("Exception:" + e.getMessage());
+            e.printStackTrace();
+        }     
+{%- endmacro -%}
+
+{% macro dept_no_return() -%}
+        List<Dept> rows = new ArrayList<Dept>();
+        {%- if db_family_type == "sql" %}
+        {{ sql() }}        
+        {%- elif db_family == "none" %}
+        {{ nodb() }}
+        {%- elif db_family == "opensearch" %}
+        {{ opensearch() }}
+        {%- elif db_family == "nosql" %}
+        {{ nosql() }}
+        {%- endif %}
+{%- endmacro -%}
+
+{% macro sql() -%} 
+{%- if java_framework == "springboot" %}
+        rows = repository.findAll();
+{%- else %}
+        try {           
+{%- if db_family == "oracle" %}
+            Connection conn = null;
+            Statement stmt = null;
+            ResultSet rset = null;
+            try {
+                conn = pds.getConnection();
+                stmt = conn.createStatement();
+                rset = stmt.executeQuery("SELECT deptno, dname, loc FROM dept");
+                while (rset.next()) {
+                    rows.add(new Dept(rset.getInt(1), rset.getString(2), rset.getString(3)));
+                }
+            } finally {
+                if (rset != null)
+                    rset.close();
+                if (stmt != null)
+                    stmt.close();
+                if (conn != null)
+                    conn.close();
+            }
+{%- else %}
+            Connection conn = DriverManager.getConnection( System.getenv("JDBC_URL") , System.getenv("DB_USER"), System.getenv("DB_PASSWORD"));
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery("SELECT deptno, dname, loc FROM dept");
+            while (rs.next()) {
+                rows.add(new Dept(rs.getInt(1), rs.getString(2), rs.getString(3) ));
+            }
+            rs.close();
+            stmt.close();
+            conn.close();
+{%- endif %}
+        } catch (SQLException e) {
+            System.err.println(e.getMessage());
+            e.printStackTrace();
+        }
+{%- endif %}
+{%- endmacro -%}  
+
+{% macro nodb() -%}    
+        rows.add(new Dept(10, "ACCOUNTING", "Seoul" ));
+        rows.add(new Dept(20, "RESEARCH", "Cape Town" ));
+        rows.add(new Dept(30, "SALES", "Brussels"));
+        rows.add(new Dept(40, "OPERATIONS", "San Francisco"));
+{%- endmacro -%}   
+
+{% macro opensearch() -%}    
+        String s=System.getenv("JDBC_URL");
+        String db_url=s.substring(s.indexOf("https://")+8,s.indexOf(":9200"));
+        URL url = new URL("https://"+db_url+":9200/dept/_search?size=1000&scroll=1m&pretty=true");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        BufferedReader br = new BufferedReader(new InputStreamReader((conn.getInputStream())));
+        String body = br.lines().collect(Collectors.joining());
+        conn.disconnect();
+
+        JsonObject jsonObject = Json.createReader(new StringReader(body)).readObject();
+        JsonArray hitsArray = jsonObject.getJsonObject("hits").getJsonArray("hits");   
+        for (JsonObject hit : hitsArray.getValuesAs(JsonObject.class)) {
+            JsonObject source = hit.getJsonObject("_source");
+            rows.add(new Dept(Integer.valueOf(source.getString("deptno")), source.getString("dname"), source.getString("loc") ));
+        }
+{%- endmacro -%}   
+
+{% macro nosql() -%}    
+        // See https://github.com/oracle/nosql-examples/blob/master/examples-nosql-java-sdk/sqlexamples/QueryData.java
+        QueryRequest queryRequest = new QueryRequest().setStatement("SELECT deptno, dname, loc FROM dept");
+        QueryIterableResult results = handle.queryIterable(queryRequest);
+        for (MapValue row : results) {
+           rows.add( new Dept( row.get("deptno").asInteger().getValue(), row.get("dname").asString().getValue(), row.get("loc").asString().getValue() ) );
+        }        
+{%- endmacro -%}   

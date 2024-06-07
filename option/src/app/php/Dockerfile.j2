@@ -1,0 +1,20 @@
+# Need Full docker image to have access to dnf 
+FROM oraclelinux:8
+
+WORKDIR /app
+COPY src/wa_php_oci.sh /app
+RUN  /app/wa_php_oci.sh && \
+     {%- if db_family == "psql" %}
+     yum install -y php-pgsql && \
+     {%- endif %}     
+     sed -i "s/Listen 80$/Listen 8080/" /etc/httpd/conf/httpd.conf && \
+     rm /etc/nginx/default.d/php.conf
+
+WORKDIR /app
+COPY src/html/* /var/www/html/
+COPY src/php.ini.append.docker /app
+RUN cat /app/php.ini.append.docker >> /etc/php.ini
+COPY src/app.conf /etc/httpd/conf.d/
+# ENTRYPOINT ["httpd", "-D", "FOREGROUND"]
+# Docker does not start php-fpm as service for strange reasons...
+CMD ["/bin/bash", "-c", "mkdir /run/php-fpm && php-fpm && httpd -D FOREGROUND"]

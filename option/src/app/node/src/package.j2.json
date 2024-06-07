@@ -1,0 +1,13 @@
+{% import "node.j2_macro" as m with context %}
+{
+    "name": "Starter",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Starter app",
+    "dependencies": {
+        "express": "^4.18.2"
+        {{ m.dependencies() }}     
+    },
+    "author": "You",
+    "license": "MIT"
+  }

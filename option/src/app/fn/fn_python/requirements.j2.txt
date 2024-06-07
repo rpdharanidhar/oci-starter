@@ -1,0 +1,3 @@
+{% import "python.j2_macro" as m with context %}
+fdk
+{{ m.requirements() }}   
